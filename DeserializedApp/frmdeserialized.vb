@@ -61,18 +61,16 @@ Public Class frmdeserialized
         Try
 
             objconnectionautohrdwLoop.Open()
-            'SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_get_ArcusAir_Reference_Target_Reference", objconnectionautohrdwLoop) '
-            'SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_aa_data_import_reference_data", objconnectionautohrdwLoop)
-            SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_aa_data_import_reference_data_secondary", objconnectionautohrdwLoop)
+            SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_get_ArcusAir_Reference_Target_Reference", objconnectionautohrdwLoop) '
             SQLCommandLoop.CommandType = CommandType.StoredProcedure
             SQLReaderLoop = SQLCommandLoop.ExecuteReader(Data.CommandBehavior.CloseConnection)
 
 
             Do While SQLReaderLoop.Read
 
-                SourceDocument = SQLReaderLoop("Source_Collection")
+                SourceDocument = SQLReaderLoop("Source_Document")
                 TargetTable = SQLReaderLoop("Target_Table")
-                Clear_Destination(TargetTable)
+                'Clear_Destination(TargetTable)
                 Extract_Data_From_MongoDB(MongoDBConnectionString, SourceDocument, TargetTable)
 
             Loop
@@ -84,7 +82,8 @@ Public Class frmdeserialized
         Catch ex As Exception
 
             objconnectionautohrdwLoop.Close()
-            StartLog(SourceDocument, TargetTable & vbCrLf & ex.Message, 0)
+            MsgBox(ex.Message)
+            'StartLog(SourceDocument, TargetTable & vbCrLf & ex.Message, 0)
             End
         End Try
     End Sub
@@ -110,14 +109,14 @@ Public Class frmdeserialized
         Dim span As TimeSpan = TimeSpan.FromHours(2)
 
         Dim mongo As MongoClient = New MongoClient(mongodbstr)
-        mongo.Settings.SocketTimeout = span
+        'mongo.Settings.SocketTimeout = span
 
         Dim db = mongo.GetDatabase("arcusairdb")
         Dim collection = db.GetCollection(Of BsonDocument)(SDocument)
         Dim q = New BsonDocument()
-        Dim f = Builders(Of BsonDocument).Projection.Exclude("resulttext")
-        'Dim list = collection.Find(q).ToList()
-        Dim list = collection.Find(q).Project(f).ToList
+        'Dim f = Builders(Of BsonDocument).Projection.Exclude("resulttext")
+        Dim list = collection.Find(q).ToList()
+        'Dim list = collection.Find(q).Project(f).ToList
 
 
 
@@ -189,6 +188,8 @@ Public Class frmdeserialized
 
     Public Function StartLog(Sdocument As String, TTable As String, SDocCount As Integer)
 
+
+
         Try
 
             objconnectionautohrdw.Open()
@@ -202,19 +203,22 @@ Public Class frmdeserialized
             SQLCommand.Parameters("@ReferenceDocumentCount").Value = SDocCount
             SQLReader = SQLCommand.ExecuteReader(Data.CommandBehavior.CloseConnection)
 
-            If SQLReader.Read Then
-                Lockid = SQLReader("LockID")
-            End If
+            'If SQLReader.Read Then
+            '    Lockid = SQLReader("LockID")
+            'End If
 
             objconnectionautohrdw.Close()
 
         Catch ex As Exception
+            MsgBox(ex.Message)
             objconnectionautohrdw.Close()
         End Try
 
     End Function
 
     Public Sub EndLog(lckid As Integer, DescCount As Integer)
+
+        Exit Sub
 
         Try
             objconnectionautohrdw.Open()
@@ -224,7 +228,7 @@ Public Class frmdeserialized
             SQLCommand.Parameters("@DestinationRowsCount").Value = lckid
             SQLCommand.Parameters.Add("@LockID", SqlDbType.Int, 4, "@LockID")
             SQLCommand.Parameters("@LockID").Value = DescCount
-            SQLCommand.ExecuteNonQuery
+            SQLCommand.ExecuteNonQuery()
             objconnectionautohrdw.Close()
         Catch ex As Exception
             objconnectionautohrdw.Close()
