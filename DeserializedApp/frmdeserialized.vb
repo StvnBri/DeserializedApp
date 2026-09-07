@@ -42,18 +42,19 @@ Public Class frmdeserialized
 
     Public Sub Get_MongDB_Credentials()
 
-        objconnectionautohrdw.Open()
-        SQLCommand = New Data.SqlClient.SqlCommand("sproc_get_arcusair_uat_credentials", objconnectionautohrdw)
-        SQLCommand.CommandType = CommandType.StoredProcedure
-        SQLReader = SQLCommand.ExecuteReader(Data.CommandBehavior.CloseConnection)
+        objconnectionautohrdw.Open() ' Open the db connection
+        SQLCommand = New Data.SqlClient.SqlCommand("sproc_get_arcusair_uat_credentials", objconnectionautohrdw) ' Tells execute this stored procedure.
+        SQLCommand.CommandType = CommandType.StoredProcedure ' specify that this is stored proc type and not a raw sql qeuery.
+        SQLReader = SQLCommand.ExecuteReader(Data.CommandBehavior.CloseConnection) ' finally exection of stored proc.
 
+        ' Validation if the table has a row then grab the value and return it if empty it will return an error.
         If SQLReader.Read Then
-            MongoDBConnectionString = SQLReader("AAConnectionString")
+            MongoDBConnectionString = SQLReader("AAConnectionString") ' True
         Else
-            MsgBox("Credentials Not Found")
+            MsgBox("Credentials Not Found") ' False
             End
         End If
-        objconnectionautohrdw.Close()
+        objconnectionautohrdw.Close() ' close the db connection
 
     End Sub
 
@@ -61,18 +62,25 @@ Public Class frmdeserialized
 
         Try
 
-            objconnectionautohrdwLoop.Open()
-            SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_get_ArcusAir_Reference_Target_Reference", objconnectionautohrdwLoop) '
-            SQLCommandLoop.CommandType = CommandType.StoredProcedure
-            SQLReaderLoop = SQLCommandLoop.ExecuteReader(Data.CommandBehavior.CloseConnection)
+            objconnectionautohrdwLoop.Open() ' open the db connection
+            SQLCommandLoop = New Data.SqlClient.SqlCommand("sproc_get_ArcusAir_Reference_Target_Reference", objconnectionautohrdwLoop) ' Tells execute this stored proc
+            SQLCommandLoop.CommandType = CommandType.StoredProcedure ' specify that this is stored proc type and not a raw sql qeuery.
+            SQLReaderLoop = SQLCommandLoop.ExecuteReader(Data.CommandBehavior.CloseConnection) ' finally exection of stored proc.
+
+            ' Validation: If a row exists → run the loop
+            ' If no more rows → exit the loop
+            Do While SQLReaderLoop.Read ' Starts a loop that iterates through each row returned by the stored procedure.
+                ' .Read returns True if there is another row to read; otherwise, it ends the loop.
+
+                SourceDocument = SQLReaderLoop("Source_Document") ' where it came from/Source
+                TargetTable = SQLReaderLoop("Target_Table") ' where to write it/ Destination
 
 
-            Do While SQLReaderLoop.Read
+                ' --- Start of Extraction ---
+                Clear_Destination(TargetTable) ' Delete the existing data. Before inserting new.
 
-                SourceDocument = SQLReaderLoop("Source_Document")
-                TargetTable = SQLReaderLoop("Target_Table")
-                Clear_Destination(TargetTable)
                 Extract_Data_From_MongoDB(MongoDBConnectionString, SourceDocument, TargetTable)
+                ' --- End of Extraction & Loading (SQLBulkCopy happens inside Extract_Data_From_MongoDB) ---
 
             Loop
 
@@ -94,121 +102,161 @@ Public Class frmdeserialized
         querystring = "Delete From " & ReferenceTbl & "  where '" & ReferenceTbl & "' in (Select Target_Table From Lst_Collection_Table_Reference where  Active = 1)"
         objconnectionautohrdw.Open()
         SQLCommand = New Data.SqlClient.SqlCommand(querystring, objconnectionautohrdw)
-        SQLCommand.CommandType = CommandType.Text
-        SQLCommand.ExecuteNonQuery()
-        objconnectionautohrdw.Close()
+        SQLCommand.CommandType = CommandType.Text ' Code when raw SQL
+        SQLCommand.ExecuteNonQuery() ' ExecuteNonQuery is used because DELETE does not return data, only affects rows.
+        objconnectionautohrdw.Close() ' Closes the database connection after execution.
 
     End Sub
 
     Public Sub Extract_Data_From_MongoDB(mongodbstr As String, SDocument As String, TTable As String)
 
-        Dim lcnt As Integer
-        Dim vcnt As Integer
-        Dim dt As New DataTable
+        Dim lcnt As Integer ' Row counter
+        Dim vcnt As Integer ' Column/Value Counter
+
+        Dim dtFull As New DataTable 'dtFull renamed for easy to distiguish from previous one. holds all extracted data before SQL insert : *** Temporary Variable
+
         Dim tempstr As String = ""
-        Dim dr As DataRow
-        Dim span As TimeSpan = TimeSpan.FromHours(2)
+        Dim dr As DataRow ' adding new rows to dtFull/ represents a single row in dtFull
 
+        ' --- Start of Extraction ---
+        'Connect to mongo db
         Dim mongo As MongoClient = New MongoClient(mongodbstr)
-        'mongo.Settings.SocketTimeout = span
-
-        Dim db = mongo.GetDatabase("arcusairdb")
+        Dim db = mongo.GetDatabase("arcusairdb") ' arcusairdb mongodb name
         Dim collection = db.GetCollection(Of BsonDocument)(SDocument)
-        Dim q = New BsonDocument()
-        'Dim f = Builders(Of BsonDocument).Projection.Exclude("resulttext")
-        Dim list = collection.Find(q).ToList()
-        'Dim list = collection.Find(q).Project(f).ToList
+        Dim q = New BsonDocument() ' Create an empty query. An empty query means get all documents.
+        Dim list = collection.Find(q).ToList() ' Retrieves all documents from the collection and stores them temporarily in memory.
+        ' --- End of Extraction ---
 
+        StartLog(SDocument, TTable, list.Count) ' Logs the process start and records how many documents were found.
 
+        ' --- Start of Transformation ---
+        ' Convert MongoDB documents to DataTable
+        If list.Count > 0 Then
+            For Each element As BsonElement In list.Item(0).Elements 'check if the column is already existing
 
+                If Not dtFull.Columns.Contains(element.Name.ToString) Then ' check key/value pair
 
-        StartLog(SDocument, TTable, list.Count)
+                    dtFull.Columns.Add(element.Name.ToString, GetType(String)) ' The data type is set to String.
+                End If
+            Next
+        End If
 
+        ' Outer Loop for looping for rows.
         Do Until lcnt = list.Count
 
-            dt.Rows.Add()
+            ' Creates a new row in the DataTable
+            dr = dtFull.NewRow()
+            dtFull.Rows.Add(dr) 'adding rows
+
             vcnt = 0
 
+            ' Inner loop looping for fields/Columns
             Do Until vcnt = list.Item(lcnt).Values.Count
 
                 Try
+                    Dim columnName As String = list.Item(lcnt).ElementAt(vcnt).Name.ToString
+                    Dim columnValue As String = list.Item(lcnt).Values(vcnt).ToString.Replace("[]", "0")
 
+                    If columnName.Contains("__v") = False Then 'Ignores MongoDB’s internal __v field
 
-                    vcnt = vcnt + 1
-                    ' txtdata.Text = txtdata.Text & list.Item(lcnt).Values(vcnt - 1).ToString
-                    tempstr = tempstr & "," & list.Item(lcnt).Values(vcnt - 1).ToString
-                    If list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString.Contains("__v") = False Then
-                        dt.Columns.Add(list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString, GetType(String))
-                        dt.Rows(0)(list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString) = list.Item(lcnt).Values(vcnt - 1).ToString.Replace("[]", 0)
+                        ' If a Then column doesn't exist yet, create it. Column Type Is String
+                        If Not dtFull.Columns.Contains(columnName) Then
+                            dtFull.Columns.Add(columnName, GetType(String))
+                        End If
 
-                        ' txtdata.Text = txtdata.Text & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString & "=" & list.Item(lcnt).Values(vcnt - 1).ToString
-                    Else
-                        StartLog(SDocument, TTable & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString, 0)
+                        'Populate the column for the current row dr. Saves the field value into the correct column of the current row
+                        dr(columnName) = columnValue
+
                     End If
-
+                    vcnt = vcnt + 1 ' Move to next field. Move to the new column.
 
                 Catch ex As Exception
-                    'MsgBox(ex.Message)
-                    StartLog(SDocument, TTable & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString & vbCrLf & ex.Message & vbCrLf & "Extract_Data_From_MongoDB", 0)
+                    StartLog(SDocument, TTable & vbCrLf & ex.Message & vbCrLf & "Extract_Data_From_MongoDB - Inner Loop Error", 0)
                 End Try
-
             Loop
-            txtdata.Text = tempstr
-            Process_Data_Transfer(TTable, dt)
-            dt.Rows.Clear()
-            dt.Columns.Clear()
-            lcnt = lcnt + 1
 
+            lcnt = lcnt + 1 ' Move to next document/row
+
+            If lcnt = 360000 Then 'Limit 300,000 rows then exit to loop and proceed Process_Data_Transfer. Prevents memory overload
+                Exit Do
+            End If
         Loop
+        ' --- End of Transformation ---
 
-        EndLog(Lockid, vcnt)
+        ' --- Start of Loading ---
+        If dtFull.Rows.Count > 0 Then
+            Process_Data_Transfer(TTable, dtFull) ' Transfers collected data to the target SQL table
+        End If
+        ' --- End of Loading ---
+
+        EndLog(Lockid, dtFull.Rows.Count)
 
     End Sub
 
+    ' SQL Loading
     Public Sub Process_Data_Transfer(sourcetablename As String, sourcetable As DataTable)
 
-        Dim columnstr As String
+        Dim columnstr As String 'Used to collect column names for error logging.
 
         Try
+            ' Ensures the database connection starts clean.
+            If objconnectionautohrdw.State = ConnectionState.Open Then
+                objconnectionautohrdw.Close()
+            End If
 
-            objconnectionautohrdw.Open()
+            objconnectionautohrdw.Open() ' Open the connection
+
+            ' Creation of Object 'SQLBulkCopy'
             Using SQLBulkCopy As SqlClient.SqlBulkCopy = New SqlClient.SqlBulkCopy(objconnectionautohrdw)
 
+                SQLBulkCopy.DestinationTableName = sourcetablename 'Specifies which SQL Server table will receive the data
+
+                'SQLBulkCopy.BulkCopyTimeout = 600 ' 10 minutes (adjust as needed)
+
+
                 For Each c As DataColumn In sourcetable.Columns
-                    SQLBulkCopy.ColumnMappings.Add(c.ColumnName, c.ColumnName)
-                    columnstr = columnstr & "," & c.ColumnName
+
+                    SQLBulkCopy.ColumnMappings.Add(c.ColumnName, c.ColumnName) ' it matches the field and columns.
+                    columnstr = columnstr & "," & c.ColumnName ' Concatenates all column names into a single comma-separated string. Used later for error logging in case something fails
                 Next
-                SQLBulkCopy.DestinationTableName = sourcetablename
-                SQLBulkCopy.WriteToServer(sourcetable.CreateDataReader)
+
+                ' --- Loading ---
+                SQLBulkCopy.WriteToServer(sourcetable) ' write of the ENTIRE DataTable
+                ' --- End of Loading ---
             End Using
-            objconnectionautohrdw.Close()
+
+            objconnectionautohrdw.Close() ' Close the connection after the process
 
         Catch ex As Exception
-            objconnectionautohrdw.Close()
-            'MsgBox(ex.Message)
-            StartLog(sourcetablename, columnstr & vbCrLf & ex.Message & vbCrLf & txtdata.Text & "Process_Data_Transfer", 0)
-
-            'End
+            If objconnectionautohrdw.State = ConnectionState.Open Then
+                objconnectionautohrdw.Close()
+            End If
+            ' Log the error
+            StartLog(sourcetablename, columnstr & vbCrLf & ex.Message & vbCrLf & "Process_Data_Transfer Error", 0)
         End Try
-
 
     End Sub
 
     Public Function StartLog(Sdocument As String, TTable As String, SDocCount As Integer)
-
-
-
         Try
+            If objconnectionautohrdw.State = ConnectionState.Open Then
+                objconnectionautohrdw.Close()
+            End If
 
             objconnectionautohrdw.Open()
             SQLCommand = New Data.SqlClient.SqlCommand("sproc_save_logs", objconnectionautohrdw)
             SQLCommand.CommandType = CommandType.StoredProcedure
+
+            ' ===PARAMETERS====
             SQLCommand.Parameters.Add("@Reference", SqlDbType.NVarChar, 1000, "@Reference")
             SQLCommand.Parameters("@Reference").Value = Sdocument
+
             SQLCommand.Parameters.Add("@Destination", SqlDbType.NVarChar, 4000, "@Destination")
             SQLCommand.Parameters("@Destination").Value = TTable
+
             SQLCommand.Parameters.Add("@ReferenceDocumentCount", SqlDbType.Int, 4, "@ReferenceDocumentCount")
             SQLCommand.Parameters("@ReferenceDocumentCount").Value = SDocCount
+
             SQLReader = SQLCommand.ExecuteReader(Data.CommandBehavior.CloseConnection)
 
             'If SQLReader.Read Then
