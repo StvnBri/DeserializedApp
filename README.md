@@ -1,2 +1,3 @@
 # DeserializedApp
-Full refresh migration tool from mongodb to ms sql server.
+Full refresh data migration tool from mongodb to ms sql server.
+Extract, Transform, Load
