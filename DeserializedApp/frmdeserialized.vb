@@ -31,12 +31,13 @@ Public Class frmdeserialized
     Public TargetTable As String
     Public querystring As String
     Public Lockid As Integer
+    ' Public TEMPSTR As String
 
     Private Sub frmdeserialized_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
         Get_MongDB_Credentials()
         Get_Source_Target()
-
+        End
     End Sub
 
     Public Sub Get_MongDB_Credentials()
@@ -70,7 +71,7 @@ Public Class frmdeserialized
 
                 SourceDocument = SQLReaderLoop("Source_Document")
                 TargetTable = SQLReaderLoop("Target_Table")
-                'Clear_Destination(TargetTable)
+                Clear_Destination(TargetTable)
                 Extract_Data_From_MongoDB(MongoDBConnectionString, SourceDocument, TargetTable)
 
             Loop
@@ -82,8 +83,8 @@ Public Class frmdeserialized
         Catch ex As Exception
 
             objconnectionautohrdwLoop.Close()
-            MsgBox(ex.Message)
-            'StartLog(SourceDocument, TargetTable & vbCrLf & ex.Message, 0)
+            'MsgBox(ex.Message)
+            StartLog(SourceDocument, TargetTable & vbCrLf & ex.Message, 0)
             End
         End Try
     End Sub
@@ -132,21 +133,27 @@ Public Class frmdeserialized
 
                 Try
 
-                    'txtdata.Text = txtdata.Text & vbCrLf & list.Item(lcnt).ElementAt(vcnt).Name.ToString & "=" & list.Item(lcnt).Values(vcnt).ToString
+
                     vcnt = vcnt + 1
+                    ' txtdata.Text = txtdata.Text & list.Item(lcnt).Values(vcnt - 1).ToString
+                    tempstr = tempstr & "," & list.Item(lcnt).Values(vcnt - 1).ToString
                     If list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString.Contains("__v") = False Then
                         dt.Columns.Add(list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString, GetType(String))
                         dt.Rows(0)(list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString) = list.Item(lcnt).Values(vcnt - 1).ToString.Replace("[]", 0)
+
+                        ' txtdata.Text = txtdata.Text & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString & "=" & list.Item(lcnt).Values(vcnt - 1).ToString
                     Else
-                        ' StartLog(SDocument, TTable & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString, 0)
+                        StartLog(SDocument, TTable & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString, 0)
                     End If
 
 
                 Catch ex As Exception
+                    'MsgBox(ex.Message)
                     StartLog(SDocument, TTable & vbCrLf & list.Item(lcnt).ElementAt(vcnt - 1).Name.ToString & vbCrLf & ex.Message & vbCrLf & "Extract_Data_From_MongoDB", 0)
                 End Try
 
             Loop
+            txtdata.Text = tempstr
             Process_Data_Transfer(TTable, dt)
             dt.Rows.Clear()
             dt.Columns.Clear()
@@ -178,7 +185,8 @@ Public Class frmdeserialized
 
         Catch ex As Exception
             objconnectionautohrdw.Close()
-            StartLog(sourcetablename, columnstr & vbCrLf & ex.Message & vbCrLf & "Process_Data_Transfer", 0)
+            'MsgBox(ex.Message)
+            StartLog(sourcetablename, columnstr & vbCrLf & ex.Message & vbCrLf & txtdata.Text & "Process_Data_Transfer", 0)
 
             'End
         End Try
@@ -210,7 +218,7 @@ Public Class frmdeserialized
             objconnectionautohrdw.Close()
 
         Catch ex As Exception
-            MsgBox(ex.Message)
+            'MsgBox(ex.Message)
             objconnectionautohrdw.Close()
         End Try
 
@@ -231,6 +239,7 @@ Public Class frmdeserialized
             SQLCommand.ExecuteNonQuery()
             objconnectionautohrdw.Close()
         Catch ex As Exception
+            'MsgBox(ex.Message)
             objconnectionautohrdw.Close()
         End Try
     End Sub
@@ -384,6 +393,10 @@ Public Class frmdeserialized
             objconnectionautohrdw.Close()
             End
         End Try
+
+    End Sub
+
+    Private Sub TextBox1_TextChanged(sender As Object, e As EventArgs) Handles TextBox1.TextChanged
 
     End Sub
 
